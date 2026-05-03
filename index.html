@@ -1,4 +1,4 @@
-D<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -46,9 +46,6 @@ D<!DOCTYPE html>
         <!-- Main Content Area Wrapper -->
         <div class="main-content-wrapper">
             <header class="main-header">
-                <button class="menu-toggle mobile-only" id="menuToggle" aria-label="Toggle menu">
-                    <i class="fas fa-bars"></i>
-                </button>
                 <div class="search-bar">
                     <input type="text" id="searchInput" placeholder="Search sermons, events...">
                     <button class="search-icon" aria-label="Search">
@@ -56,7 +53,7 @@ D<!DOCTYPE html>
                     </button>
                 </div>
                 <div class="date-filter">
-                    <input type="date" id="eventDateFilter" title="Filter by Event Date">
+                    <input type="date" id="eventDateFilter" title="Filter by Event Date" aria-label="Filter by date in MM slash DD slash YYYY format" lang="en-US">
                     <button id="clearDateFilter" title="Clear Date Filter" class="hidden">
                         <i class="fas fa-times"></i>
                     </button>
@@ -145,6 +142,16 @@ D<!DOCTYPE html>
                     <div id="launchpad-container" class="launchpad-grid"></div>
                     <div id="launchpad-viewer" class="launchpad-viewer hidden">
                         <div class="launchpad-viewer-header">
+                            <button
+                                id="launchpadViewerMenuBtn"
+                                class="launchpad-header-menu-btn"
+                                type="button"
+                                aria-label="Open plugin navigation"
+                                aria-controls="sidebarOverlay"
+                                aria-expanded="false"
+                            >
+                                <i class="fas fa-bars" aria-hidden="true"></i>
+                            </button>
                             <div class="launchpad-viewer-meta">
                                 <img id="launchpadViewerIcon" alt="Plugin icon" class="launchpad-viewer-icon">
                                 <div>
@@ -153,16 +160,9 @@ D<!DOCTYPE html>
                                 </div>
                             </div>
                             <div class="launchpad-viewer-actions">
-                                <button
-                                    id="launchpadEmbedInfoBtn"
-                                    class="launchpad-info-btn"
-                                    type="button"
-                                    aria-label="Embedding information"
-                                    title="If this plugin does not render, the host may block iframe embedding."
-                                >
-                                    <i class="fas fa-info-circle" aria-hidden="true"></i>
+                                <button id="launchpadCloseBtn" type="button" aria-label="Close plugin">
+                                    <i class="fas fa-times" aria-hidden="true"></i>
                                 </button>
-                                <button id="launchpadCloseBtn" type="button">Close</button>
                             </div>
                         </div>
                         <iframe

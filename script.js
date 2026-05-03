@@ -166,6 +166,34 @@ let launchpadActivePluginId = null;
 let launchpadSearchTerm = '';
 let launchpadViewerHideTimer = null;
 
+function setSidebarOpen(isOpen) {
+    const sidebarWrapper = document.querySelector('.sidebar-wrapper');
+    const sidebarOverlay = document.getElementById('sidebarOverlay');
+    const menuButtons = document.querySelectorAll('#launchpadViewerMenuBtn');
+
+    if (sidebarWrapper) {
+        sidebarWrapper.classList.toggle('active', Boolean(isOpen));
+    }
+
+    if (sidebarOverlay) {
+        sidebarOverlay.classList.toggle('active', Boolean(isOpen));
+    }
+
+    menuButtons.forEach((button) => {
+        button.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+        button.classList.toggle('is-open', Boolean(isOpen));
+    });
+}
+
+function toggleSidebar() {
+    const sidebarWrapper = document.querySelector('.sidebar-wrapper');
+    setSidebarOpen(!(sidebarWrapper && sidebarWrapper.classList.contains('active')));
+}
+
+function closeSidebar() {
+    setSidebarOpen(false);
+}
+
 /**
  * Pause all playing media on the page (HTML5 video/audio and YouTube iframes).
  * This is called when navigation changes to ensure media stops when leaving a page.
@@ -211,36 +239,13 @@ function getPlayerContainer() {
 
 document.addEventListener('DOMContentLoaded', () => {
     // DOM Elements
-    const sidebarWrapper = document.querySelector('.sidebar-wrapper');
-    const menuToggle = document.querySelector('.menu-toggle');
     const navItems = document.querySelectorAll('.nav-item');
-    const contentSections = document.querySelectorAll('.content-section');
     const searchInput = document.getElementById('searchInput');
     const eventDateFilterInput = document.getElementById('eventDateFilter');
     const clearDateFilterButton = document.getElementById('clearDateFilter');
-    const mainHeader = document.querySelector('.main-header');
-    const mainContentWrapper = document.querySelector('.main-content-wrapper');
 
     // --- Mobile Hamburger Menu Toggle ---
     const sidebarOverlay = document.getElementById('sidebarOverlay');
-    
-    function toggleSidebar() {
-        sidebarWrapper.classList.toggle('active');
-        if (sidebarOverlay) {
-            sidebarOverlay.classList.toggle('active');
-        }
-    }
-    
-    function closeSidebar() {
-        sidebarWrapper.classList.remove('active');
-        if (sidebarOverlay) {
-            sidebarOverlay.classList.remove('active');
-        }
-    }
-    
-    if (menuToggle) {
-        menuToggle.addEventListener('click', toggleSidebar);
-    }
     
     if (sidebarOverlay) {
         sidebarOverlay.addEventListener('click', closeSidebar);
@@ -249,7 +254,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Close sidebar when clicking nav items on mobile
     navItems.forEach(item => {
         item.addEventListener('click', () => {
-            if (window.innerWidth <= 1024) {
+            if (window.innerWidth <= 1024 || document.body.classList.contains('launchpad-plugin-active')) {
                 closeSidebar();
             }
         });
@@ -452,7 +457,7 @@ document.addEventListener('DOMContentLoaded', () => {
             currentSearchTerm = ''; // Reset search term state
             eventDateFilterInput.value = ''; // Clear date filter visually
             currentFilterDate = null; // Reset date filter state
-            clearDateFilterButton.style.display = 'none'; // Hide clear button
+            clearDateFilterButton.classList.add('hidden');
 
             // Update active navigation item
             navItems.forEach(nav => nav.classList.remove('active'));
@@ -498,9 +503,9 @@ document.addEventListener('DOMContentLoaded', () => {
     eventDateFilterInput.addEventListener('change', (e) => {
         currentFilterDate = e.target.value; // YYYY-MM-DD format
         if (currentFilterDate) {
-            clearDateFilterButton.style.display = 'inline-flex'; // Show clear button
+            clearDateFilterButton.classList.remove('hidden');
         } else {
-            clearDateFilterButton.style.display = 'none'; // Hide clear button
+            clearDateFilterButton.classList.add('hidden');
         }
 
         if (activeSection !== 'home' && activeSection !== 'launchpad') {
@@ -511,7 +516,7 @@ document.addEventListener('DOMContentLoaded', () => {
     clearDateFilterButton.addEventListener('click', () => {
         eventDateFilterInput.value = '';
         currentFilterDate = null;
-        clearDateFilterButton.style.display = 'none';
+        clearDateFilterButton.classList.add('hidden');
         if (activeSection !== 'home' && activeSection !== 'launchpad') {
             loadContentFirebase(activeSection, currentSearchTerm, currentFilterDate);
         }
@@ -1350,7 +1355,12 @@ function launchpadHostLabel(url) {
 }
 
 function initializeLaunchpadViewer() {
+    const menuBtn = document.getElementById('launchpadViewerMenuBtn');
     const closeBtn = document.getElementById('launchpadCloseBtn');
+    if (menuBtn && !menuBtn.dataset.bound) {
+        menuBtn.dataset.bound = 'true';
+        menuBtn.addEventListener('click', toggleSidebar);
+    }
     if (closeBtn && !closeBtn.dataset.bound) {
         closeBtn.dataset.bound = 'true';
         closeBtn.addEventListener('click', () => {
@@ -1371,16 +1381,20 @@ function setLaunchpadFocusMode(isFocused) {
     }
 
     if (isFocused) {
+        document.body.classList.add('launchpad-plugin-active');
         viewer.classList.remove('hidden');
         container.setAttribute('aria-hidden', 'true');
+        closeSidebar();
         requestAnimationFrame(() => {
             section.classList.add('plugin-open');
         });
         return;
     }
 
+    document.body.classList.remove('launchpad-plugin-active');
     section.classList.remove('plugin-open');
     container.removeAttribute('aria-hidden');
+    closeSidebar();
     launchpadViewerHideTimer = setTimeout(() => {
         if (!section.classList.contains('plugin-open')) {
             viewer.classList.add('hidden');
