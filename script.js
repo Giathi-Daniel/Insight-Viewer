@@ -1,5 +1,3 @@
-// --- Firebase Configuration and Initialization ---
-// IMPORTANT: This is your specific project's connection details.
 const firebaseConfig = {
     apiKey: "AIzaSyD_AnGX-RO7zfM_rCBopJmdv3BOVE4V-_o",
     authDomain: "media-app-a702b.firebaseapp.com",
@@ -10,16 +8,12 @@ const firebaseConfig = {
     measurementId: "G-LPBXF7MLWF"
 };
 
-// ADMIN EMAIL - Change this to your admin email address
-// In production, store this in Vercel environment variables as ADMIN_EMAIL
-const ADMIN_EMAIL = "admin@example.com"; // Replace with your actual admin email
+const ADMIN_EMAIL = "";
 
-// Import Firebase functions from CDN
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.9.0/firebase-app.js";
 import { getFirestore, collection, query, where, onSnapshot, doc, setDoc, getDoc, updateDoc } from "https://www.gstatic.com/firebasejs/11.9.0/firebase-firestore.js";
 import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, sendPasswordResetEmail, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, setPersistence, browserLocalPersistence, updateProfile } from "https://www.gstatic.com/firebasejs/11.9.0/firebase-auth.js";
 
-// Initialize Firebase app and Firestore database instance
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const auth = getAuth(app);
@@ -35,28 +29,19 @@ async function initializeAuthSessionPersistence() {
 }
 initializeAuthSessionPersistence();
 
-// --- Admin Configuration ---
-const SETTINGS_DOC_ID = "app_settings"; // Single document for app settings
+const SETTINGS_DOC_ID = "app_settings";
 
-/**
- * Sign in with Google
- * Uses Firebase Auth with GoogleAuthProvider
- * Automatically creates account on first login
- */
 async function signInWithGoogle() {
     try {
         const provider = new GoogleAuthProvider();
-        // Add scopes if needed
         provider.addScope('https://www.googleapis.com/auth/youtube.readonly');
         
-        // Sign in with popup
         const result = await signInWithPopup(auth, provider);
         const user = result.user;
         await loadProfileFromBackend(user);
         
         console.log('Google sign-in successful:', user.email);
         
-        // Return success
         return { success: true, message: `Welcome, ${user.displayName || user.email}!` };
     } catch (error) {
         console.error('Google sign-in error:', error);
@@ -64,9 +49,6 @@ async function signInWithGoogle() {
     }
 }
 
-/**
- * Sign out user
- */
 async function signOutUser() {
     try {
         await signOut(auth);
@@ -78,22 +60,14 @@ async function signOutUser() {
     }
 }
 
-/**
- * Check if the current user is the admin
- * @returns {Promise<boolean>} True if user is admin, false otherwise
- */
 async function isCurrentUserAdmin() {
     const user = auth.currentUser;
-    if (!user || !user.email) {
+    if (!ADMIN_EMAIL || !user || !user.email) {
         return false;
     }
     return user.email.toLowerCase() === ADMIN_EMAIL.toLowerCase();
 }
 
-/**
- * Check if YouTube sync has been completed
- * @returns {Promise<boolean>} True if sync is completed
- */
 async function isYouTubeSyncCompleted() {
     try {
         const settingsDoc = await getDoc(doc(db, "settings", SETTINGS_DOC_ID));
@@ -107,9 +81,6 @@ async function isYouTubeSyncCompleted() {
     }
 }
 
-/**
- * Mark YouTube sync as completed in Firestore
- */
 async function markYouTubeSyncCompleted() {
     try {
         await setDoc(doc(db, "settings", SETTINGS_DOC_ID), {
@@ -122,13 +93,6 @@ async function markYouTubeSyncCompleted() {
     }
 }
 
-/**
- * Check if the Connect YouTube button should be visible
- * Requirements:
- * 1. User must be logged in as admin
- * 2. YouTube sync must NOT be completed yet
- * @returns {Promise<boolean>}
- */
 async function shouldShowConnectYouTubeButton() {
     const isAdmin = await isCurrentUserAdmin();
     const syncCompleted = await isYouTubeSyncCompleted();
@@ -136,9 +100,6 @@ async function shouldShowConnectYouTubeButton() {
     return isAdmin && !syncCompleted;
 }
 
-/**
- * Update the visibility of the Connect YouTube button
- */
 async function updateConnectYouTubeButtonVisibility() {
     const connectBtn = document.getElementById("connectYoutube");
     const btnContainer = document.querySelector(".youtube-btn-container");
@@ -154,17 +115,124 @@ async function updateConnectYouTubeButtonVisibility() {
     }
 }
 
-// --- Global Variables and DOM Elements ---
 let activeSection = 'home';
 let currentSearchTerm = '';
-let currentFilterDate = null; // Stores the selected date filter (YYYY-MM-DD)
-let autoplayEnabled = true; // Auto-play next video in playlist
-let currentPlaylist = []; // Store current playlist items
+let currentFilterDate = null;
+let autoplayEnabled = true;
+let currentPlaylist = [];
 let launchpadPluginsUnsubscribe = null;
 let launchpadPluginsCache = [];
 let launchpadActivePluginId = null;
 let launchpadSearchTerm = '';
 let launchpadViewerHideTimer = null;
+const HOME_PAGE_SIZE = 12;
+const SECTION_PAGE_SIZE = 9;
+let homeVisibleCount = HOME_PAGE_SIZE;
+let homeDocsCache = [];
+let homeUnsubscribe = null;
+let homeSearchTerm = '';
+let currentWatchDoc = null;
+let currentWatchList = [];
+let currentWatchSidebarIds = new Set();
+let pendingWatchVideoId = new URLSearchParams(window.location.search).get('v');
+const sectionState = {};
+
+window.addEventListener('wheel', (event) => {
+    if (event.ctrlKey || event.metaKey || !event.deltaY) return;
+    const scrollRoot = document.scrollingElement || document.documentElement;
+    const beforeTop = scrollRoot.scrollTop;
+
+    requestAnimationFrame(() => {
+        if (scrollRoot.scrollTop === beforeTop) {
+            window.scrollBy({ top: event.deltaY, left: event.deltaX, behavior: 'auto' });
+        }
+    });
+}, { passive: true, capture: true });
+
+function getSectionState(section) {
+    if (!sectionState[section]) {
+        sectionState[section] = {
+            docs: [],
+            searchTerm: '',
+            filterDate: null,
+            visibleCount: SECTION_PAGE_SIZE,
+            unsubscribe: null
+        };
+    }
+    return sectionState[section];
+}
+
+function getTimestampMillis(docItem) {
+    const data = docItem && docItem.data ? docItem.data : {};
+    if (data.eventDate) {
+        const eventTime = data.eventTime || '00:00';
+        const eventDate = new Date(`${data.eventDate}T${eventTime}`);
+        if (!Number.isNaN(eventDate.getTime())) return eventDate.getTime();
+    }
+    if (data.timestamp && typeof data.timestamp.toDate === 'function') {
+        return data.timestamp.toDate().getTime();
+    }
+    if (data.createdAt) {
+        const createdDate = new Date(data.createdAt);
+        if (!Number.isNaN(createdDate.getTime())) return createdDate.getTime();
+    }
+    return 0;
+}
+
+function sortByDateDesc(a, b) {
+    return getTimestampMillis(b) - getTimestampMillis(a);
+}
+
+function getDisplayDate(docItem) {
+    const data = docItem && docItem.data ? docItem.data : {};
+    if (data.eventDate) return data.eventDate;
+    if (data.timestamp && typeof data.timestamp.toDate === 'function') {
+        return data.timestamp.toDate().toISOString().slice(0, 10);
+    }
+    return 'No Date';
+}
+
+function formatDateLabel(dateKey) {
+    if (!dateKey || dateKey === 'No Date') return 'Content without a specific date';
+    const date = new Date(`${dateKey}T00:00:00`);
+    if (Number.isNaN(date.getTime())) return dateKey;
+    return date.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+}
+
+function createLoadMoreButton(remainingCount, onClick) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'load-more-btn';
+    button.innerHTML = `<i class="fas fa-chevron-down" aria-hidden="true"></i> Load more (${remainingCount})`;
+    button.addEventListener('click', onClick);
+    return button;
+}
+
+function notifyUser(isSuccess, message) {
+    const modal = document.getElementById('registration-modal');
+    const modalIcon = document.getElementById('registration-modal-icon');
+    const modalTitle = document.getElementById('registration-modal-title');
+    const modalMessage = document.getElementById('registration-modal-message');
+    const modalClose = document.getElementById('registration-modal-close');
+
+    if (!modal || !modalIcon || !modalTitle || !modalMessage || !modalClose) {
+        alert((isSuccess ? 'Success: ' : 'Error: ') + message);
+        return;
+    }
+
+    modalIcon.className = 'registration-modal-icon ' + (isSuccess ? 'success' : 'error');
+    modalTitle.textContent = isSuccess ? 'Saved' : 'Action failed';
+    modalMessage.textContent = message;
+    modal.setAttribute('aria-hidden', 'false');
+    modal.style.display = 'flex';
+    modalClose.onclick = () => {
+        modal.setAttribute('aria-hidden', 'true');
+        modal.style.display = 'none';
+    };
+
+    const overlay = modal.querySelector('.registration-modal-overlay');
+    if (overlay) overlay.onclick = modalClose.onclick;
+}
 
 function setSidebarOpen(isOpen) {
     const sidebarWrapper = document.querySelector('.sidebar-wrapper');
@@ -192,6 +260,167 @@ function toggleSidebar() {
 
 function closeSidebar() {
     setSidebarOpen(false);
+}
+
+function closeWatchView() {
+    const theater = document.getElementById('theaterContainer');
+    const grid = document.getElementById('homeVideoGrid');
+    const loadMoreMount = document.getElementById('homeLoadMoreMount');
+    const sectionStrip = document.querySelector('#home-section .section-strip');
+    const playerContainer = getPlayerContainer();
+
+    if (theater) {
+        theater.classList.add('hidden');
+        theater.style.display = 'none';
+    }
+
+    if (grid) grid.style.display = '';
+    if (loadMoreMount) loadMoreMount.style.display = '';
+    if (sectionStrip) sectionStrip.style.display = '';
+    if (playerContainer) playerContainer.innerHTML = '';
+    renderPlayerDetails(null);
+    updateWatchUrl(null);
+    currentPlaylist = [];
+    currentWatchDoc = null;
+    currentWatchList = [];
+    currentWatchSidebarIds = new Set();
+}
+
+function goHomeDefault() {
+    pauseAllMedia();
+    closeWatchView();
+    closeLaunchpadViewer();
+
+    activeSection = 'home';
+    currentSearchTerm = '';
+    homeSearchTerm = '';
+    currentFilterDate = null;
+
+    document.getElementById('searchInput') && (document.getElementById('searchInput').value = '');
+    document.getElementById('eventDateFilter') && (document.getElementById('eventDateFilter').value = '');
+    document.getElementById('clearDateFilter')?.classList.add('hidden');
+
+    document.querySelectorAll('.content-section').forEach(section => section.classList.remove('active'));
+    document.getElementById('home-section')?.classList.add('active');
+    document.querySelectorAll('.nav-item').forEach(item => item.classList.remove('active'));
+    document.querySelector('.nav-item[data-section="home"]')?.classList.add('active');
+
+    loadHomeVideos();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function performSearch() {
+    const searchInput = document.getElementById('searchInput');
+    const term = (searchInput?.value || '').trim();
+    currentSearchTerm = term;
+
+    if (activeSection === 'launchpad') {
+        loadLaunchpadPlugins(term);
+        return;
+    }
+
+    if (activeSection !== 'home') {
+        loadContentFirebase(activeSection, term, currentFilterDate);
+        return;
+    }
+
+    closeWatchView();
+    homeSearchTerm = term;
+    homeVisibleCount = HOME_PAGE_SIZE;
+    renderHomeVideos();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function buildVideoShareUrl(docItem) {
+    const id = encodeURIComponent(docItem?.id || '');
+    const base = `${window.location.origin}${window.location.pathname}`;
+    return id ? `${base}?v=${id}` : window.location.href;
+}
+
+function getVideoKey(docItem) {
+    const data = docItem?.data || {};
+    const youtubeId = data.url ? getYouTubeVideoId(data.url) : '';
+    return youtubeId || data.url || docItem?.id || data.title || '';
+}
+
+function getUniqueRelatedDocs(selectedDoc) {
+    const seen = new Set([getVideoKey(selectedDoc), selectedDoc?.id].filter(Boolean));
+    const sourceDocs = currentWatchList.length ? currentWatchList : homeDocsCache;
+    const uniqueDocs = [];
+
+    sourceDocs.forEach((docItem) => {
+        const key = getVideoKey(docItem);
+        if (!key || seen.has(key) || seen.has(docItem.id)) return;
+        seen.add(key);
+        if (docItem.id) seen.add(docItem.id);
+        uniqueDocs.push(docItem);
+    });
+
+    return uniqueDocs;
+}
+
+function updateWatchUrl(docItem) {
+    const url = new URL(window.location.href);
+    if (docItem?.id) {
+        url.searchParams.set('v', docItem.id);
+    } else {
+        url.searchParams.delete('v');
+    }
+    window.history.replaceState({}, '', url);
+}
+
+function openShareModal(docItem) {
+    const shareModal = document.getElementById('shareModal');
+    const shareInput = document.getElementById('shareVideoLink');
+    if (!shareModal || !shareInput) return;
+    shareInput.value = buildVideoShareUrl(docItem || currentWatchDoc);
+    shareModal.setAttribute('aria-hidden', 'false');
+    document.body.style.overflow = 'hidden';
+    setTimeout(() => shareInput.select(), 0);
+}
+
+function closeShareModal() {
+    const shareModal = document.getElementById('shareModal');
+    if (!shareModal) return;
+    shareModal.setAttribute('aria-hidden', 'true');
+    document.body.style.overflow = '';
+}
+
+async function copyShareLink() {
+    const shareInput = document.getElementById('shareVideoLink');
+    if (!shareInput) return;
+    const value = shareInput.value;
+    try {
+        await navigator.clipboard.writeText(value);
+        notifyUser(true, 'Link copied.');
+    } catch (error) {
+        shareInput.select();
+        document.execCommand('copy');
+        notifyUser(true, 'Link copied.');
+    }
+}
+
+function downloadCurrentVideo() {
+    const item = currentWatchDoc?.data || {};
+    const url = item.url || '';
+    if (!url) {
+        notifyUser(false, 'No downloadable media found.');
+        return;
+    }
+
+    const youtubeId = getYouTubeVideoId(url);
+    if (youtubeId) {
+        window.open(url, '_blank', 'noopener,noreferrer');
+        return;
+    }
+
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `${(item.title || 'media').replace(/[^\w.-]+/g, '-')}`;
+    anchor.rel = 'noopener noreferrer';
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
 }
 
 /**
@@ -243,6 +472,35 @@ document.addEventListener('DOMContentLoaded', () => {
     const searchInput = document.getElementById('searchInput');
     const eventDateFilterInput = document.getElementById('eventDateFilter');
     const clearDateFilterButton = document.getElementById('clearDateFilter');
+    const mainHeader = document.querySelector('.main-header');
+    const mainContentWrapper = document.querySelector('.main-content-wrapper');
+    const sidebarWrapper = document.querySelector('.sidebar-wrapper');
+    const contentSections = document.querySelectorAll('.content-section');
+    const sidebarToggle = document.getElementById('sidebarToggle');
+    const activeSectionTitle = document.getElementById('activeSectionTitle');
+    const topbarLogo = document.querySelector('.topbar-logo');
+
+    if (sidebarToggle) {
+        sidebarToggle.addEventListener('click', () => {
+            if (window.innerWidth <= 1024) {
+                toggleSidebar();
+                const isOpen = sidebarWrapper && sidebarWrapper.classList.contains('active');
+                sidebarToggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+                return;
+            }
+
+            const collapsed = document.body.classList.toggle('sidebar-collapsed');
+            sidebarToggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+        });
+    }
+
+    topbarLogo?.addEventListener('click', goHomeDefault);
+    topbarLogo?.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            goHomeDefault();
+        }
+    });
 
     // --- Mobile Hamburger Menu Toggle ---
     const sidebarOverlay = document.getElementById('sidebarOverlay');
@@ -269,16 +527,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function showJoker() {
         if (!jokerScreen) return;
+        const autoplaySettingState = document.getElementById('autoplaySettingState');
+        if (autoplaySettingState) autoplaySettingState.textContent = autoplayEnabled ? 'On' : 'Off';
+        updateThemeSettingState();
         jokerScreen.setAttribute('aria-hidden', 'false');
-        jokerScreen.style.display = 'block';
-        // lock background scroll
         document.body.style.overflow = 'hidden';
-        pauseAllMedia();
     }
     function hideJoker() {
         if (!jokerScreen) return;
         jokerScreen.setAttribute('aria-hidden', 'true');
-        jokerScreen.style.display = 'none';
         document.body.style.overflow = '';
         settingsGear && settingsGear.focus();
     }
@@ -298,6 +555,62 @@ document.addEventListener('DOMContentLoaded', () => {
     jokerBackPortalMobile && jokerBackPortalMobile.addEventListener('click', (e) => {
         e.preventDefault();
         hideJoker();
+    });
+
+    document.querySelectorAll('[data-close-settings]').forEach((element) => {
+        element.addEventListener('click', hideJoker);
+    });
+
+    document.getElementById('autoplaySetting')?.addEventListener('click', () => {
+        autoplayEnabled = !autoplayEnabled;
+        const autoplaySettingState = document.getElementById('autoplaySettingState');
+        if (autoplaySettingState) autoplaySettingState.textContent = autoplayEnabled ? 'On' : 'Off';
+    });
+
+    function updateThemeSettingState() {
+        const themeSettingState = document.getElementById('themeSettingState');
+        if (themeSettingState) {
+            themeSettingState.textContent = document.body.classList.contains('dark-mode') ? 'Dark mode' : 'Light mode';
+        }
+    }
+
+    const savedTheme = localStorage.getItem('ruiruTheme');
+    if (savedTheme === 'dark') {
+        document.body.classList.add('dark-mode');
+    }
+    updateThemeSettingState();
+
+    document.getElementById('darkModeSetting')?.addEventListener('click', () => {
+        const isDark = document.body.classList.toggle('dark-mode');
+        localStorage.setItem('ruiruTheme', isDark ? 'dark' : 'light');
+        updateThemeSettingState();
+    });
+
+    document.getElementById('qualitySetting')?.addEventListener('click', () => {
+        showRegistrationModal(true, 'Playback quality is set to Auto.');
+    });
+
+    document.getElementById('aboutSetting')?.addEventListener('click', () => {
+        showRegistrationModal(true, 'Ruiru Media House media viewer.');
+    });
+
+    document.querySelectorAll('[data-close-share]').forEach((element) => {
+        element.addEventListener('click', closeShareModal);
+    });
+
+    document.getElementById('copyShareLink')?.addEventListener('click', copyShareLink);
+
+    document.addEventListener('click', (event) => {
+        const shareButton = event.target.closest('.watch-share-btn');
+        if (shareButton) {
+            openShareModal(currentWatchDoc);
+            return;
+        }
+
+        const downloadButton = event.target.closest('.watch-download-btn');
+        if (downloadButton) {
+            downloadCurrentVideo();
+        }
     });
 
     // Commands in Joker overlay (right-side buttons)
@@ -413,7 +726,7 @@ document.addEventListener('DOMContentLoaded', () => {
         
         // Set modal content
         modalIcon.className = 'registration-modal-icon ' + (isSuccess ? 'success' : 'error');
-        modalTitle.textContent = isSuccess ? 'Registration Successful!' : 'Registration Failed';
+        modalTitle.textContent = isSuccess ? 'Saved' : 'Action failed';
         modalMessage.textContent = message;
         
         // Show modal
@@ -451,10 +764,19 @@ document.addEventListener('DOMContentLoaded', () => {
             pauseAllMedia();
             const targetSectionId = e.currentTarget.dataset.section + '-section';
             const targetSectionName = e.currentTarget.dataset.section;
+            const targetLabel = e.currentTarget.textContent.trim();
+
+            if (targetSectionName === 'home') {
+                goHomeDefault();
+                return;
+            }
 
             activeSection = targetSectionName;
+            closeWatchView();
+            if (activeSectionTitle) activeSectionTitle.textContent = targetLabel;
             searchInput.value = ''; // Clear search input visually
             currentSearchTerm = ''; // Reset search term state
+            homeSearchTerm = '';
             eventDateFilterInput.value = ''; // Clear date filter visually
             currentFilterDate = null; // Reset date filter state
             clearDateFilterButton.classList.add('hidden');
@@ -490,10 +812,22 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // --- Search Functionality ---
+    document.querySelector('.search-icon')?.addEventListener('click', performSearch);
+    searchInput.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            performSearch();
+        }
+    });
+
     searchInput.addEventListener('input', () => {
         currentSearchTerm = searchInput.value.trim();
         if (activeSection === 'launchpad') {
             loadLaunchpadPlugins(currentSearchTerm);
+        } else if (activeSection === 'home') {
+            homeSearchTerm = currentSearchTerm;
+            homeVisibleCount = HOME_PAGE_SIZE;
+            renderHomeVideos();
         } else if (activeSection !== 'home') {
             loadContentFirebase(activeSection, currentSearchTerm, currentFilterDate);
         }
@@ -556,7 +890,6 @@ document.addEventListener('DOMContentLoaded', () => {
     // Initialize Launchpad viewer controls
     initializeLaunchpadViewer();
     
-    // Initialize Joker Settings (Phase 2-5)
     initJokerSettings();
 });
 
@@ -714,48 +1047,85 @@ function restoreWelcomeFromBoundary() {
  */
 function loadHomeVideos() {
     const grid = document.getElementById('homeVideoGrid');
-    const theater = document.getElementById('theaterContainer');
-    const mainPlayer = document.getElementById('mainPlayerView');
-    const playlistGrid = document.getElementById('playlistGrid');
 
     if (!grid) return;
+    homeVisibleCount = HOME_PAGE_SIZE;
+
+    if (homeUnsubscribe) {
+        renderHomeVideos();
+        return;
+    }
+
     grid.innerHTML = '<p class="text-center-message">Loading videos...</p>';
 
-    // Listen for all documents in the collection
-    onSnapshot(contentCollectionRef, (snapshot) => {
-        let docs = [];
+    // Keep one live listener, then render page-sized chunks so the DOM and media do not load at once.
+    homeUnsubscribe = onSnapshot(contentCollectionRef, (snapshot) => {
+        const docs = [];
         snapshot.forEach(docSnap => docs.push({ id: docSnap.id, data: docSnap.data() }));
 
-        // Filter out archived similarly to other loaders
-        let relevant = docs.filter(d => (d.data.isArchived === false || d.data.isArchived === undefined));
+        homeDocsCache = docs
+            .filter(d => (d.data.isArchived === false || d.data.isArchived === undefined))
+            .sort(sortByDateDesc);
 
-        // Sort by timestamp desc
-        relevant.sort((a, b) => {
-            const ta = a.data.timestamp ? a.data.timestamp.toDate() : new Date(0);
-            const tb = b.data.timestamp ? b.data.timestamp.toDate() : new Date(0);
-            return tb - ta;
-        });
-
-        grid.innerHTML = '';
-        playlistGrid && (playlistGrid.innerHTML = '');
-
-        if (relevant.length === 0) {
-            grid.innerHTML = '<p class="text-center-message">No videos available.</p>';
-            return;
-        }
-
-        relevant.forEach((docItem, idx) => {
-            const thumb = renderHomeThumbnail(docItem);
-            thumb.addEventListener('click', () => {
-                // Open theater using the persistent fixed player and scrollable playlist
-                openTheaterWithVideo(docItem, relevant);
-            });
-            grid.appendChild(thumb);
-        });
+        renderHomeVideos();
     }, (err) => {
         console.error('Error loading home videos:', err);
         grid.innerHTML = '<p class="text-center-message">Error loading videos.</p>';
     });
+}
+
+function renderHomeVideos() {
+    const grid = document.getElementById('homeVideoGrid');
+    const playlistGrid = document.getElementById('playlistGrid');
+    const loadMoreMount = document.getElementById('homeLoadMoreMount');
+    if (!grid) return;
+
+    grid.innerHTML = '';
+    if (playlistGrid) playlistGrid.innerHTML = '';
+    if (loadMoreMount) loadMoreMount.innerHTML = '';
+
+    const filteredDocs = homeSearchTerm
+        ? homeDocsCache.filter((docItem) => {
+            const item = docItem.data || {};
+            const term = homeSearchTerm.toLowerCase();
+            return (item.title && item.title.toLowerCase().includes(term)) ||
+                (item.description && item.description.toLowerCase().includes(term)) ||
+                (item.topic && item.topic.toLowerCase().includes(term)) ||
+                (item.by && item.by.toLowerCase().includes(term)) ||
+                (item.category && item.category.toLowerCase().includes(term));
+        })
+        : homeDocsCache;
+
+    if (filteredDocs.length === 0) {
+        grid.innerHTML = '<p class="text-center-message">No videos available.</p>';
+        return;
+    }
+
+    if (pendingWatchVideoId) {
+        const targetDoc = homeDocsCache.find(doc => doc.id === pendingWatchVideoId);
+        pendingWatchVideoId = null;
+        if (targetDoc) {
+            openTheaterWithVideo(targetDoc, homeDocsCache);
+            return;
+        }
+    }
+
+    const visibleDocs = filteredDocs.slice(0, homeVisibleCount);
+    visibleDocs.forEach((docItem) => {
+        const thumb = renderHomeThumbnail(docItem);
+        thumb.addEventListener('click', () => {
+            openTheaterWithVideo(docItem, filteredDocs);
+        });
+        grid.appendChild(thumb);
+    });
+
+    const remaining = filteredDocs.length - visibleDocs.length;
+    if (remaining > 0 && loadMoreMount) {
+        loadMoreMount.appendChild(createLoadMoreButton(remaining, () => {
+            homeVisibleCount += HOME_PAGE_SIZE;
+            renderHomeVideos();
+        }));
+    }
 }
 
 /**
@@ -1049,8 +1419,10 @@ function renderHomeThumbnail(docItem) {
     wrapper.innerHTML = `
         <img src="${thumbUrl}" alt="${item.title || 'Video'}" loading="lazy">
         <div class="thumb-meta">
+            <div class="content-item-date">${formatDateLabel(getDisplayDate(docItem))}</div>
             <strong>${item.title || 'Untitled'}</strong>
-            <div class="meta-sub">${item.by ? item.by : ''}</div>
+            <p>${item.description || 'No description provided.'}</p>
+            <div class="meta-sub">${item.by ? item.by : item.category || ''}</div>
         </div>
     `;
     return wrapper;
@@ -1059,62 +1431,83 @@ function renderHomeThumbnail(docItem) {
 function openTheaterWithVideo(selectedDoc, allDocs) {
     const theater = document.getElementById('theaterContainer');
     const grid = document.getElementById('homeVideoGrid');
-    const playlistGrid = document.getElementById('playlistGrid');
-
-    const welcomeCard = document.querySelector('.welcome-card');
+    const loadMoreMount = document.getElementById('homeLoadMoreMount');
+    const sectionStrip = document.querySelector('#home-section .section-strip');
 
     if (!theater) return;
 
-    // Hide the welcome card and grid, show theater
-    if (welcomeCard) welcomeCard.style.display = 'none';
-    grid.style.display = 'none';
+    if (sectionStrip) sectionStrip.style.display = 'none';
+    if (grid) grid.style.display = 'none';
+    if (loadMoreMount) loadMoreMount.style.display = 'none';
+    theater.classList.remove('hidden');
     theater.style.display = 'flex';
 
-    // Set current playlist for autoplay
     currentPlaylist = allDocs;
+    currentWatchList = allDocs;
 
-    // Use the persistent fixed player container to show the selected video
     const playerContainer = getPlayerContainer();
     if (!playerContainer) return;
-    populateMainPlayer(selectedDoc);
-    playerContainer.dataset.currentVideoId = selectedDoc.id;
+    playWatchVideo(selectedDoc, false);
 
-    // Add close button inside the persistent player container
     const existingClose = playerContainer.querySelector('.theater-close-btn');
     if (existingClose) existingClose.remove();
     const closeBtn = createCloseButton('Close');
     closeBtn.addEventListener('click', () => {
-        // hide theater and restore grid and welcome card
+        theater.classList.add('hidden');
         theater.style.display = 'none';
         if (grid) grid.style.display = '';
-        if (welcomeCard) welcomeCard.style.display = '';
+        if (loadMoreMount) loadMoreMount.style.display = '';
+        if (sectionStrip) sectionStrip.style.display = '';
         playerContainer.innerHTML = '';
-        const details = document.getElementById('playerDetails'); if (details) details.innerHTML = '';
-        currentPlaylist = []; // Clear playlist
+        renderPlayerDetails(null);
+        currentPlaylist = [];
+        currentWatchDoc = null;
+        currentWatchSidebarIds = new Set();
     });
     playerContainer.appendChild(closeBtn);
 
-    // Populate sidebar with remaining videos
-    if (playlistGrid) {
-        playlistGrid.innerHTML = '';
-        allDocs.forEach(doc => {
-            if (doc.id === selectedDoc.id) return; // skip selected
-            const p = renderPlaylistItem(doc);
-            p.dataset.videoId = doc.id;
-            p.addEventListener('click', () => {
-                populateMainPlayer(doc);
-                playerContainer.dataset.currentVideoId = doc.id;
-                updatePlaylistHighlight(doc.id);
+    setTimeout(() => {
+        const headerOffset = document.querySelector('.main-header')?.offsetHeight || 0;
+        const topPos = theater.getBoundingClientRect().top + window.scrollY - headerOffset;
+        window.scrollTo({ top: topPos, behavior: 'smooth' });
+    }, 40);
+}
+
+function playWatchVideo(docItem, shouldScroll = true) {
+    const playerContainer = getPlayerContainer();
+    if (!playerContainer) return;
+
+    renderWatchSidebar(docItem);
+    populateMainPlayer(docItem);
+    playerContainer.dataset.currentVideoId = docItem.id;
+    updatePlaylistHighlight(docItem.id);
+
+    if (shouldScroll) {
+        const theater = document.getElementById('theaterContainer');
+        const headerOffset = document.querySelector('.main-header')?.offsetHeight || 0;
+        if (theater) {
+            window.scrollTo({
+                top: theater.getBoundingClientRect().top + window.scrollY - headerOffset,
+                behavior: 'smooth'
             });
-            playlistGrid.appendChild(p);
-        });
+        }
     }
+}
 
-    // Highlight current video
-    updatePlaylistHighlight(selectedDoc.id);
+function renderWatchSidebar(selectedDoc) {
+    const playlistGrid = document.getElementById('playlistGrid');
+    if (!playlistGrid) return;
 
-    // Add autoplay toggle to the top of playlist
-    addAutoplayToggle();
+    const sidebarDocs = getUniqueRelatedDocs(selectedDoc).slice(0, 10);
+    currentWatchSidebarIds = new Set(sidebarDocs.map(doc => doc.id));
+    playlistGrid.innerHTML = '';
+
+    sidebarDocs.forEach((docItem) => {
+        const playlistItem = renderPlaylistItem(docItem);
+        playlistItem.dataset.videoId = docItem.id;
+        playlistItem.addEventListener('click', () => playWatchVideo(docItem));
+        playlistGrid.appendChild(playlistItem);
+    });
 }
 
 function renderPlaylistItem(docItem) {
@@ -1129,10 +1522,84 @@ function renderPlaylistItem(docItem) {
         <img src="${thumb}" alt="${item.title}" loading="lazy">
         <div class="playlist-meta">
             <div class="title">${item.title || 'Untitled'}</div>
-            <div class="sub">${item.by || ''}</div>
+            <div class="sub">${item.by || item.category || ''}</div>
         </div>
     `;
     return row;
+}
+
+function renderPlayerDetails(docItem) {
+    const details = document.getElementById('playerDetails');
+    if (!details) return;
+    if (!docItem) {
+        currentWatchDoc = null;
+        details.innerHTML = '';
+        return;
+    }
+
+    currentWatchDoc = docItem;
+    const item = docItem.data || {};
+    const meta = [
+        formatDateLabel(getDisplayDate(docItem)),
+        item.by,
+        item.category
+    ].filter(Boolean).join(' · ');
+
+    details.innerHTML = `
+        <h1>${escapeHtml(item.title || 'Untitled')}</h1>
+        <div class="watch-meta">${escapeHtml(meta)}</div>
+        <div class="watch-actions">
+            <button class="watch-action-btn watch-share-btn" type="button">
+                <i class="fas fa-share" aria-hidden="true"></i> Share
+            </button>
+            <button class="watch-action-btn watch-download-btn" type="button">
+                <i class="fas fa-download" aria-hidden="true"></i> Download
+            </button>
+        </div>
+        <p>${escapeHtml(item.description || 'No description provided.')}</p>
+        ${item.topic ? `<div class="watch-topic">Topic: ${escapeHtml(item.topic)}</div>` : ''}
+        <section class="watch-more-section" aria-label="More videos">
+            <h2>More videos</h2>
+            <div class="watch-more-grid" id="watchMoreGrid"></div>
+        </section>
+    `;
+    renderWatchMoreGrid(docItem);
+}
+
+function renderWatchMoreGrid(selectedDoc) {
+    const grid = document.getElementById('watchMoreGrid');
+    if (!grid) return;
+    grid.innerHTML = '';
+
+    const relatedDocs = getUniqueRelatedDocs(selectedDoc)
+        .filter(doc => !currentWatchSidebarIds.has(doc.id));
+
+    relatedDocs.forEach((docItem) => {
+        const card = renderWatchMoreCard(docItem);
+        card.addEventListener('click', () => {
+            playWatchVideo(docItem);
+        });
+        grid.appendChild(card);
+    });
+}
+
+function renderWatchMoreCard(docItem) {
+    const item = docItem.data || {};
+    const card = document.createElement('button');
+    card.className = 'watch-more-card';
+    card.type = 'button';
+
+    const youtubeId = item.url ? getYouTubeVideoId(item.url) : null;
+    const thumb = youtubeId
+        ? `https://i.ytimg.com/vi/${youtubeId}/hqdefault.jpg`
+        : (item.thumbnailUrl || 'https://via.placeholder.com/320x180.png?text=Video');
+
+    card.innerHTML = `
+        <img src="${thumb}" alt="${escapeHtml(item.title || 'Video')}" loading="lazy">
+        <span>${escapeHtml(item.title || 'Untitled')}</span>
+        <small>${escapeHtml(item.by || item.category || formatDateLabel(getDisplayDate(docItem)))}</small>
+    `;
+    return card;
 }
 
 function populateMainPlayer(docItem) {
@@ -1140,6 +1607,8 @@ function populateMainPlayer(docItem) {
     if (!target) return;
     const item = docItem.data;
     target.innerHTML = '';
+    renderPlayerDetails(docItem);
+    updateWatchUrl(docItem);
 
     const ytId = item.url ? getYouTubeVideoId(item.url) : null;
     if (ytId) {
@@ -1660,114 +2129,91 @@ function loadContentFirebase(section, searchTerm = '', filterDate = null) {
         return;
     }
 
-    // Clear previous content and show a temporary message
+    const state = getSectionState(section);
+    const filtersChanged = state.searchTerm !== searchTerm || state.filterDate !== filterDate;
+    state.searchTerm = searchTerm;
+    state.filterDate = filterDate;
+    if (filtersChanged) state.visibleCount = SECTION_PAGE_SIZE;
+
+    if (state.unsubscribe) {
+        renderSectionContent(section);
+        return;
+    }
+
     contentContainer.innerHTML = '<p class="text-center-message">Loading content...</p>';
 
-    // Query for active items in a specific category.
-    // We will filter by isArchived status client-side to include old docs.
-    let q = query(
-        contentCollectionRef,
-        where("category", "==", section)
-    );
+    const q = query(contentCollectionRef, where("category", "==", section));
 
-    onSnapshot(q, (snapshot) => {
-        let docs = [];
+    state.unsubscribe = onSnapshot(q, (snapshot) => {
+        const docs = [];
         snapshot.forEach(docSnapshot => {
             docs.push({ id: docSnapshot.id, data: docSnapshot.data() });
         });
 
-        // Client-side filter to include items where isArchived is explicitly false OR undefined (old docs)
-        let relevantDocs = docs.filter(docItem => {
-            const isArchivedStatus = docItem.data.isArchived;
-            return isArchivedStatus === false || isArchivedStatus === undefined;
-        });
+        state.docs = docs
+            .filter(docItem => docItem.data.isArchived === false || docItem.data.isArchived === undefined)
+            .sort(sortByDateDesc);
 
-        // Client-side sorting by timestamp (newest first)
-        relevantDocs.sort((a, b) => {
-            const tsA = a.data.timestamp ? a.data.timestamp.toDate() : new Date(0);
-            const tsB = b.data.timestamp ? b.data.timestamp.toDate() : new Date(0);
-            return tsB - tsA; // Descending order
-        });
-
-        // Client-side filter for search term
-        let filteredDocs = relevantDocs;
-        if (searchTerm) {
-            const lowerSearchTerm = searchTerm.toLowerCase();
-            filteredDocs = filteredDocs.filter(docItem => {
-                const item = docItem.data;
-                return (item.title && item.title.toLowerCase().includes(lowerSearchTerm)) ||
-                       (item.description && item.description.toLowerCase().includes(lowerSearchTerm)) ||
-                       (item.topic && item.topic.toLowerCase().includes(lowerSearchTerm)) ||
-                       (item.by && item.by.toLowerCase().includes(lowerSearchTerm));
-            });
-        }
-
-        // Client-side filter for event date
-        if (filterDate) {
-            filteredDocs = filteredDocs.filter(docItem => {
-                const itemEventDate = docItem.data.eventDate; // YYYY-MM-DD string
-                return itemEventDate === filterDate;
-            });
-        }
-
-        contentContainer.innerHTML = ''; // Clear existing content
-
-        if (filteredDocs.length === 0) {
-            const message = `No content found in this category${searchTerm ? ` for "${searchTerm}"` : ''}${filterDate ? ` on ${new Date(filterDate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}` : ''}.`;
-            contentContainer.innerHTML = `<p class="text-center-message">${message}</p>`;
-            return;
-        }
-
-        // Group content by event date for display
-        const groupedContent = {};
-        if (!filterDate) { // Only group by date if no specific date filter is active
-            filteredDocs.forEach(docItem => {
-                const eventDate = docItem.data.eventDate; // YYYY-MM-DD
-                if (eventDate) {
-                    if (!groupedContent[eventDate]) {
-                        groupedContent[eventDate] = [];
-                    }
-                    groupedContent[eventDate].push(docItem);
-                } else {
-                    // Handle items without an eventDate, put them in a 'No Date' category
-                    if (!groupedContent['No Date']) {
-                        groupedContent['No Date'] = [];
-                    }
-                    groupedContent['No Date'].push(docItem);
-                }
-            });
-
-            // Sort dates in descending order
-            const sortedDates = Object.keys(groupedContent).sort((a, b) => {
-                if (a === 'No Date') return 1; // 'No Date' comes last
-                if (b === 'No Date') return -1;
-                return new Date(b) - new Date(a);
-            });
-
-            sortedDates.forEach(date => {
-                const dateHeading = document.createElement('h3');
-                dateHeading.classList.add('date-group-heading');
-                dateHeading.textContent = date === 'No Date' ? 'Content without a specific date' : new Date(date).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-                contentContainer.appendChild(dateHeading);
-
-                    groupedContent[date].forEach(docItem => {
-                        renderContentItem(docItem, contentContainer, { section, list: filteredDocs });
-                    });
-            });
-
-        } else { // If a specific date is filtered, just render all filtered docs
-            filteredDocs.forEach(docItem => {
-                renderContentItem(docItem, contentContainer, { section, list: filteredDocs });
-            });
-        }
-        
-        // Also populate video grid for theater mode (like home section)
-        populateVideoGrid(section, filteredDocs);
+        renderSectionContent(section);
 
     }, (error) => {
         console.error("Error fetching documents from Firestore: ", error);
         contentContainer.innerHTML = '<p class="text-center-message">Error loading content. Please check your internet connection and Firebase rules.</p>';
     });
+}
+
+function getFilteredSectionDocs(section) {
+    const state = getSectionState(section);
+    let filteredDocs = state.docs;
+    if (state.searchTerm) {
+        const lowerSearchTerm = state.searchTerm.toLowerCase();
+        filteredDocs = filteredDocs.filter(docItem => {
+            const item = docItem.data;
+            return (item.title && item.title.toLowerCase().includes(lowerSearchTerm)) ||
+                   (item.description && item.description.toLowerCase().includes(lowerSearchTerm)) ||
+                   (item.topic && item.topic.toLowerCase().includes(lowerSearchTerm)) ||
+                   (item.by && item.by.toLowerCase().includes(lowerSearchTerm));
+        });
+    }
+
+    if (state.filterDate) {
+        filteredDocs = filteredDocs.filter(docItem => docItem.data.eventDate === state.filterDate);
+    }
+
+    return filteredDocs;
+}
+
+function renderSectionContent(section) {
+    const state = getSectionState(section);
+    const contentContainer = document.getElementById(`${section}-container`);
+    const loadMoreMount = document.getElementById(`${section}-load-more`);
+    if (!contentContainer) return;
+
+    const filteredDocs = getFilteredSectionDocs(section);
+    const visibleDocs = filteredDocs.slice(0, state.visibleCount);
+
+    contentContainer.innerHTML = '';
+    if (loadMoreMount) loadMoreMount.innerHTML = '';
+
+    if (filteredDocs.length === 0) {
+        const message = `No content found in this category${state.searchTerm ? ` for "${state.searchTerm}"` : ''}${state.filterDate ? ` on ${formatDateLabel(state.filterDate)}` : ''}.`;
+        contentContainer.innerHTML = `<p class="text-center-message">${message}</p>`;
+        return;
+    }
+
+    visibleDocs.forEach(docItem => {
+        renderContentItem(docItem, contentContainer, { section, list: filteredDocs });
+    });
+
+    const remaining = filteredDocs.length - visibleDocs.length;
+    if (remaining > 0 && loadMoreMount) {
+        loadMoreMount.appendChild(createLoadMoreButton(remaining, () => {
+            state.visibleCount += SECTION_PAGE_SIZE;
+            renderSectionContent(section);
+        }));
+    }
+
+    populateVideoGrid(section, visibleDocs);
 }
 
 /**
@@ -1804,37 +2250,18 @@ function renderContentItem(docItem, container, opts = {}) {
     const contentItemDiv = document.createElement('div');
     contentItemDiv.classList.add('content-item');
 
-    let mediaContent = '';
     const youtubeId = item.url ? getYouTubeVideoId(item.url) : null;
-
-    if (youtubeId) {
-        const originEnc = encodeURIComponent(window.location && window.location.origin ? window.location.origin : '');
-        mediaContent = `
-            <div class="video-container">
-                <iframe
-                    src="https://www.youtube.com/embed/${youtubeId}?rel=0&enablejsapi=1&origin=${originEnc}"
-                    frameborder="0"
-                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                    allowfullscreen
-                    title="${item.title || 'YouTube video player'}"
-                ></iframe>
-            </div>
-        `;
-    } else if (item.url) {
-        // Assume it's a direct file URL from Firebase Storage or another source
-        // We can add logic here to differentiate video/audio/image if needed
-        if (item.url.match(/\.(mp4|webm|ogg)$/i)) { // Basic video file check
-            mediaContent = `<div class="video-container"><video controls src="${item.url}" style="width:100%; height:100%; border-radius:8px;"></video></div>`;
-        } else if (item.url.match(/\.(mp3|wav|aac)$/i)) { // Basic audio file check
-            mediaContent = `<audio controls src="${item.url}" style="width:100%; margin-top:15px;"></audio>`;
-        } else if (item.url.match(/\.(png|jpg|jpeg|gif|webp)$/i)) { // Basic image file check
-            mediaContent = `<img src="${item.url}" alt="${item.title}" style="width:100%; height:auto; border-radius:8px; margin-top:15px; object-fit: cover;">`;
-        } else {
-            mediaContent = `<a href="${item.url}" target="_blank" rel="noopener noreferrer" class="view-link">View Content Link</a>`;
-        }
-    }
+    const thumbUrl = youtubeId
+        ? `https://i.ytimg.com/vi/${youtubeId}/hqdefault.jpg`
+        : (item.thumbnailUrl || (item.url && item.url.match(/\.(png|jpg|jpeg|gif|webp)$/i) ? item.url : 'https://via.placeholder.com/640x360.png?text=Media'));
+    const dateLabel = formatDateLabel(getDisplayDate(docItem));
 
     contentItemDiv.innerHTML = `
+        <div class="content-item-media">
+            <img src="${thumbUrl}" alt="${item.title || 'Media thumbnail'}" loading="lazy">
+            <span class="play-badge"><i class="fas fa-play" aria-hidden="true"></i></span>
+        </div>
+        <div class="content-item-date">${dateLabel}</div>
         <h3>${item.title}</h3>
         <p>${item.description || 'No description provided.'}</p>
         <div class="metadata">
@@ -1843,7 +2270,6 @@ function renderContentItem(docItem, container, opts = {}) {
             ${item.topic ? `<strong>Topic:</strong> ${item.topic}<br>` : ''}
             ${item.by ? `<strong>By:</strong> ${item.by}<br>` : ''}
         </div>
-        ${mediaContent}
     `;
     container.appendChild(contentItemDiv);
 
@@ -1854,11 +2280,15 @@ function renderContentItem(docItem, container, opts = {}) {
         contentItemDiv.addEventListener('click', (ev) => {
             // Prevent clicks on embedded media from triggering theater
             const tag = ev.target && ev.target.tagName ? ev.target.tagName.toLowerCase() : '';
-            if (['iframe', 'video', 'audio', 'a', 'img', 'button'].includes(tag)) return;
+            if (['iframe', 'video', 'audio', 'a', 'button'].includes(tag)) return;
             if (sectionName && listDocs) {
-                openTheaterMode(sectionName, docItem, listDocs);
+                document.querySelectorAll('.content-section').forEach(section => section.classList.remove('active'));
+                document.getElementById('home-section')?.classList.add('active');
+                document.querySelectorAll('.nav-item').forEach(item => item.classList.remove('active'));
+                document.querySelector('.nav-item[data-section="home"]')?.classList.add('active');
+                activeSection = 'home';
+                openTheaterWithVideo(docItem, listDocs);
             } else {
-                // fallback: open home split theater with this single item
                 openSplitTheater(docItem, listDocs || [docItem]);
             }
         });
@@ -1957,7 +2387,6 @@ function openTheaterMode(section, selectedDoc, listDocs) {
 }
 
 // ============================================
-// THE JOKER - SETTINGS PANEL (Phase 2)
 // ============================================
 
 // Settings state management
@@ -2256,7 +2685,6 @@ function renderProfileSection() {
     return container;
 }
 
-// Render Customization Studio (Phase 3)
 function renderCustomizationSection() {
     const container = document.createElement('div');
     container.className = 'joker-action';
@@ -3332,7 +3760,7 @@ function updateSecurity() {
         return;
     }
     
-    alert('Password updated successfully! (Demo mode)');
+    showRegistrationModal(true, 'Password updated.');
     document.getElementById('securityCurrentPass').value = '';
     document.getElementById('securityNewPass').value = '';
     document.getElementById('securityConfirmPass').value = '';
@@ -3566,7 +3994,6 @@ function renderAuthForm(container, action) {
 }
 
 // ============================================
-// ARCHITECT MODE - Resize Handles (Phase 4)
 // ============================================
 
 // Initialize resize handles for an element
@@ -3663,7 +4090,6 @@ function startResize(e, element, position, options) {
 }
 
 // ============================================
-// DRAG AND DROP - Priority Dragging (Phase 4)
 // ============================================
 
 // Make element draggable
@@ -3723,7 +4149,6 @@ function initDropZone(zone, options = {}) {
 }
 
 // ============================================
-// ETERNAL MEMORY - Save/Load Positions (Phase 5)
 // ============================================
 
 // Save element position and dimensions
@@ -3789,84 +4214,12 @@ function loadAllSettings() {
     });
 }
 
-// Initialize all Joker functionality
 function initJokerSettings() {
-    // Load saved settings
-    loadAllSettings();
-
-    // Load saved profile
     loadProfile();
-
-    // Apply saved customization
-    applyCustomization();
-
-    // Add Joker command listeners (desktop)
-    document.querySelectorAll('.joker-cmd[data-action]').forEach(btn => {
-        btn.addEventListener('click', (ev) => {
-            const action = ev.currentTarget.dataset.action;
-            settingsState.currentAction = action;
-            updateJokerMenu(ev.currentTarget);
-            renderJokerDetails(action);
-        });
-    });
-
-    // Add mobile icon row listeners
-    document.querySelectorAll('.joker-mobile-icon-container[data-action]').forEach(icon => {
-        icon.addEventListener('click', (ev) => {
-            const action = ev.currentTarget.dataset.action;
-            settingsState.currentAction = action;
-            
-            // Sync desktop buttons
-            const desktopBtn = document.querySelector(`.joker-cmd[data-action="${action}"]`);
-            updateJokerMenu(desktopBtn);
-            
-            // Render details
-            renderJokerDetails(action);
-        });
-    });
-
-    // Initialize mobile icon active state based on current action
-    const currentAction = settingsState.currentAction || 'profile';
-    const activeMobileIcon = document.querySelector(`.joker-mobile-icon-container[data-action="${currentAction}"]`);
-    if (activeMobileIcon) {
-        activeMobileIcon.classList.add('active');
+    const savedFacebookUrl = localStorage.getItem('ruiruFacebookUrl');
+    if (savedFacebookUrl) {
+        settingsState.profile.socialLinks.facebook = savedFacebookUrl;
     }
-
-    // Initialize resize handles on player elements
-    const playerElements = document.querySelectorAll('.main-player-view, .hero-player-content, .video-container');
-    playerElements.forEach(el => {
-        initResizeHandles(el, {
-            minWidth: 200,
-            minHeight: 120,
-            onResize: (pos) => {
-                saveElementPosition(el);
-            }
-        });
-    });
-
-    // Initialize draggable on title and description
-    const titleEl = document.querySelector('#playerDetails h3, .player-details h3');
-    const descEl = document.querySelector('#playerDetails p, .player-details p');
-
-    if (titleEl && !titleEl.id) titleEl.id = 'player-title';
-    if (descEl && !descEl.id) descEl.id = 'player-description';
-
-    [titleEl, descEl].forEach(el => {
-        if (el) {
-            makeDraggable(el, {
-                onDragStart: () => {
-                    document.body.classList.add('dragging-active');
-                },
-                onDragEnd: () => {
-                    document.body.classList.remove('dragging-active');
-                    saveElementPosition(el);
-                }
-            });
-        }
-    });
-
-    // Initialize drop zones for architect mode
-    initDropZones();
 }
 
 // Initialize drop zones for architect mode
