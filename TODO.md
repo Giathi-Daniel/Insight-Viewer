@@ -440,3 +440,34 @@ Please implement the click handler logic according to these exact specifications
 - Just like when launching a video from the Homepage or Entertainment tabs, include `window.scrollTo(0, 0);` inside the click handler so the page automatically scrolls cleanly to the top where the video player is located.
 
 Please output only the updated JavaScript event listener loop that binds this dynamic play-on-click functionality to the history grid cards.
+We need to fix the sidebar collapse behavior on desktop/laptop screens. When the hamburger menu is clicked and the sidebar minimizes into an icon-only bar, the text for the original items hides perfectly. However, the text for our three new items (Saved Videos, History, and Support Our Work) does not disappear, causing layout issues.
+
+Please update the script and CSS so that these three new items behave exactly like the original ones during a sidebar collapse.
+
+### 1. CSS Class Alignment Rule
+Make sure your sidebar collapse styles target ALL `.nav-link` elements uniformly. If you are using a class like `.sidebar-collapsed` or `.minimized`, ensure the text span is hidden cleanly:
+
+```css
+/* When the sidebar is collapsed/minimized via the hamburger toggle */
+.sidebar-collapsed .nav-link .text {
+    display: none !important; /* Hides the text word completely */
+}
+
+/* Ensure the container width shrinks perfectly to only fit the icons */
+.sidebar-collapsed {
+    width: 70px; /* Adjust this to match your existing collapsed width */
+}
+
+/* Ensure the icon centers perfectly inside the narrow link area */
+.sidebar-collapsed .nav-link {
+    justify-content: center;
+    padding: 12px 0;
+}
+
+.sidebar-collapsed .nav-link .icon {
+    margin-right: 0 !important; /* Removes the text margin when collapsed */
+}
+2. JavaScript Verification
+If your code relies on JavaScript to dynamically hide text elements on click, make sure the loop or toggle includes the new button IDs: #savedVideosNavBtn, #historyNavBtn, and #supportBtn.
+
+Please apply this fix now so that clicking the hamburger menu toggles the text off for ALL items, leaving a clean, uniform icon-only navigation bar!

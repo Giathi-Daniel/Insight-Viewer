@@ -663,6 +663,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const collapsed = document.body.classList.toggle('sidebar-collapsed');
             sidebarToggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+            // Explicitly hide/show the text spans for all sidebar links (covers footer links)
+            try {
+                document.querySelectorAll('.sidebar-wrapper a').forEach(a => {
+                    const text = a.querySelector('.text');
+                    if (text) text.style.display = collapsed ? 'none' : '';
+                });
+            } catch (e) { /* ignore DOM errors */ }
         });
     }
 
